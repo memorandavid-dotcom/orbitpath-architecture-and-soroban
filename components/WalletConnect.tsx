@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { getWalletManager, WalletType, WalletConnection as IWalletConnection } from '@/lib/wallets/walletManager';
 import { Button } from '@/components/ui/button';
 
@@ -20,7 +21,6 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
   const [connecting, setConnecting] = useState(false);
   const [availableWallets, setAvailableWallets] = useState<WalletType[]>([]);
   const [showMenu, setShowMenu] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualPublicKey, setManualPublicKey] = useState("");
 
@@ -37,7 +37,6 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
     }
 
     setConnecting(true);
-    setError(null);
     setShowMenu(false);
 
     try {
@@ -48,10 +47,11 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
       setWalletInfo(connection);
       onConnected(connection);
       
+      toast.success(`Connected to ${connection.displayName}`);
       console.log('[OrbitPath] Wallet connected:', connection);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect wallet';
-      setError(message);
+      toast.error(message);
       console.error('[OrbitPath] Wallet connection error:', err);
     } finally {
       setConnecting(false);
@@ -62,18 +62,17 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
     const key = manualPublicKey.trim();
     
     if (!key) {
-      setError('Please enter a public key');
+      toast.error('Please enter a public key');
       return;
     }
 
     // Validate the key format before connecting
     if (!key.startsWith('G') || key.length !== 56) {
-      setError('Invalid Stellar public key format (must start with G and be 56 characters)');
+      toast.error('Invalid Stellar public key format (must start with G and be 56 characters)');
       return;
     }
 
     setConnecting(true);
-    setError(null);
 
     try {
       // Store key in sessionStorage for the adapter to retrieve
@@ -88,10 +87,11 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
       setShowManualEntry(false);
       setManualPublicKey('');
       
+      toast.success(`Connected to ${connection.displayName}`);
       console.log('[OrbitPath] Manual wallet connected:', connection);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect wallet';
-      setError(message);
+      toast.error(message);
       console.error('[OrbitPath] Manual wallet connection error:', err);
     } finally {
       setConnecting(false);
@@ -207,11 +207,7 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
             </button>
           </div>
 
-          {error && (
-            <div className="m-2 p-3 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
-              {error}
-            </div>
-          )}
+
         </div>
       )}
 
@@ -229,25 +225,15 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
               type="text"
               placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
               value={manualPublicKey}
-              onChange={(e) => {
-                setManualPublicKey(e.target.value);
-                setError(null);
-              }}
+              onChange={(e) => setManualPublicKey(e.target.value)}
               className="w-full px-3 py-2 bg-background border border-border rounded text-sm text-foreground placeholder-muted-foreground mb-4 focus:outline-none focus:ring-2 focus:ring-primary"
             />
-
-            {error && (
-              <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
-                {error}
-              </div>
-            )}
 
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => {
                   setShowManualEntry(false);
                   setManualPublicKey('');
-                  setError(null);
                 }}
                 disabled={connecting}
                 className="px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary rounded transition-colors disabled:opacity-50"
