@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from '@/components/Toaster'
 import { DebugPanel } from '@/components/DebugPanel'
+import { AuthProvider } from '@/lib/auth/context'
 
 export const metadata: Metadata = {
   title: 'OrbitPath - Intelligent Cross-Border Payments',
@@ -43,9 +44,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="bg-background">
       <body className="antialiased bg-background text-foreground">
-        {children}
-        <Toaster />
-        <DebugPanel />
+        <AuthProvider>
+          {children}
+          <Toaster />
+          <DebugPanel />
+        </AuthProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
