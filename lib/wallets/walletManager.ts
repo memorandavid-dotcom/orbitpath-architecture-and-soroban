@@ -5,6 +5,9 @@
  * Supports: Freighter, Albedo, and custom wallet implementations
  */
 
+import { walletLogger } from './logger';
+import { walletConfigManager } from './config';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -69,16 +72,21 @@ export class FreighterAdapter extends WalletAdapter {
     }
 
     try {
+      walletLogger.info('Connect', 'Attempting Freighter connection', {}, 'freighter');
       const publicKey = await (window as any).freighter.getPublicKey();
       this.publicKey = publicKey;
 
-      return {
-        type: "freighter",
+      const connection = {
+        type: "freighter" as const,
         publicKey,
         displayName: `Freighter: ${publicKey.slice(0, 8)}...`,
         isConnected: true,
       };
+
+      walletLogger.success('Connect', 'Freighter connected successfully', { publicKey: publicKey.slice(0, 8) + '...' }, 'freighter');
+      return connection;
     } catch (error) {
+      walletLogger.error('Connect', 'Freighter connection failed', error, 'freighter');
       throw new Error(`Freighter connection failed: ${error}`);
     }
   }

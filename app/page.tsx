@@ -15,13 +15,11 @@ export default function Dashboard() {
   const [walletInfo, setWalletInfo] = useState<WalletConnection | null>(null);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleQuoteReceived = useCallback((quote: PaymentQuote) => {
     console.log('[OrbitPath] Quote received in dashboard:', quote);
     setCurrentQuote(quote);
     setSelectedPath(null);
-    setError(null);
   }, []);
 
   const handlePathSelected = useCallback(async (path: PathOption) => {
@@ -85,7 +83,6 @@ export default function Dashboard() {
   const handleWalletConnected = useCallback((connection: WalletConnection) => {
     setWalletConnected(true);
     setWalletInfo(connection);
-    setError(null);
   }, []);
 
   const handleWalletDisconnected = useCallback(() => {
@@ -115,12 +112,6 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Error Banner */}
-        {error && (
-          <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-            {error}
-          </div>
-        )}
 
         {!walletConnected ? (
           /* Wallet Connection Required */
