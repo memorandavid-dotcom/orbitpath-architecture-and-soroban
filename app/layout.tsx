@@ -3,9 +3,9 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.app',
+  title: 'OrbitPath - Intelligent Cross-Border Payments',
+  description: 'Discover optimal conversion paths on Stellar Network. Save up to 80% on international transfers with automated routing and real-time fee optimization.',
+  generator: 'OrbitPath by v0',
   icons: {
     icon: [
       {
@@ -39,8 +39,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">
+    <html lang="en" className="bg-background">
+      <body className="antialiased bg-background text-foreground">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
