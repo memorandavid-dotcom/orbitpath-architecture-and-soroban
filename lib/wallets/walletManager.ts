@@ -149,20 +149,26 @@ export class AlbedoAdapter extends WalletAdapter {
 
   async connect(): Promise<WalletConnection> {
     try {
-      const result = await this.sendAlbedoMessage({
-        method: "public_key",
-      });
-
-      if (!result.public_key) {
-        throw new Error("Failed to get public key from Albedo");
+      // Check if Albedo is available in the current window context
+      if (typeof window === "undefined" || !window.opener && window.self === window.top) {
+        throw new Error(
+          "Albedo requires being opened in a popup or iframe. Visit https://albedo.link in a popup window."
+        );
       }
+
+      const result = await Promise.race([
+        this.sendAlbedoMessage({ method: "public_key" }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Albedo timeout")), 5000)
+        ),
+      ]);
 
       this.publicKey = result.public_key;
 
       return {
         type: "albedo",
-        publicKey: result.public_key,
-        displayName: `Albedo: ${result.public_key.slice(0, 8)}...`,
+        publicKey: this.publicKey,
+        displayName: "Albedo Wallet",
         isConnected: true,
       };
     } catch (error) {
@@ -267,6 +273,82 @@ export class AlbedoAdapter extends WalletAdapter {
 // WALLET MANAGER
 // ============================================================================
 
+/**
+ * Manual Entry Adapter - allows direct public key input
+ * Note: The actual key is provided by the UI component via sessionStorage
+ */
+export class ManualEntryAdapter extends WalletAdapter {
+  type: WalletType = "custom";
+  private connectedKey: string | null = null;
+
+  isInstalled(): boolean {
+    return true; // Always available as fallback
+  }
+
+  async connect(): Promise<WalletConnection> {
+    // Get the public key from where the UI component stored it
+    // In our case, the WalletConnect component handles validation and gets the key from input
+    // We get it from sessionStorage which the component would have set
+    if (typeof window === "undefined") {
+      throw new Error("Manual wallet can only be used in browser environment");
+    }
+
+    const storedKey = sessionStorage.getItem("orbitpath_manual_key");
+    
+    if (storedKey) {
+      this.connectedKey = storedKey;
+      sessionStorage.removeItem("orbitpath_manual_key"); // Clean up
+      
+      return {
+        type: "custom",
+        publicKey: storedKey,
+        displayName: `Manual Wallet (${storedKey.slice(0, 8)}...)`,
+        isConnected: true,
+      };
+    }
+
+    // If no stored key, this means the adapter was called without proper UI flow
+    throw new Error("Manual wallet entry requires the modal dialog to be used. Please try connecting through the UI.");
+  }
+
+  async disconnect(): Promise<void> {
+    this.connectedKey = null;
+  }
+
+  async getPublicKey(): Promise<string> {
+    if (!this.connectedKey) {
+      throw new Error("Wallet not connected");
+    }
+    return this.connectedKey;
+  }
+
+  isConnected(): boolean {
+    return this.connectedKey !== null;
+  }
+
+  async signTransaction(transactionXdr: string): Promise<SigningResult> {
+    if (!this.connectedKey) {
+      throw new Error("Wallet not connected");
+    }
+
+    // For manual entry, we can't actually sign without the private key
+    // This would need to be handled by external signing service
+    throw new Error(
+      "Manual wallet entry requires external signing service. Use a wallet extension instead."
+    );
+  }
+
+  async signMessage(message: string): Promise<SigningResult> {
+    if (!this.connectedKey) {
+      throw new Error("Wallet not connected");
+    }
+
+    throw new Error(
+      "Manual wallet entry cannot sign messages. Use a wallet extension instead."
+    );
+  }
+}
+
 export class WalletManager {
   private currentAdapter: WalletAdapter | null = null;
   private adapters: Map<WalletType, WalletAdapter> = new Map();
@@ -274,6 +356,7 @@ export class WalletManager {
   constructor() {
     this.adapters.set("freighter", new FreighterAdapter());
     this.adapters.set("albedo", new AlbedoAdapter());
+    this.adapters.set("custom", new ManualEntryAdapter());
   }
 
   /**

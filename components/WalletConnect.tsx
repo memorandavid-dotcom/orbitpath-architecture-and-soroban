@@ -21,6 +21,8 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
   const [availableWallets, setAvailableWallets] = useState<WalletType[]>([]);
   const [showMenu, setShowMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualPublicKey, setManualPublicKey] = useState("");
 
   useEffect(() => {
     const walletManager = getWalletManager();
@@ -29,6 +31,11 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
   }, []);
 
   const handleConnect = async (walletType: WalletType) => {
+    if (walletType === 'custom') {
+      setShowManualEntry(true);
+      return;
+    }
+
     setConnecting(true);
     setError(null);
     setShowMenu(false);
@@ -46,6 +53,46 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
       const message = err instanceof Error ? err.message : 'Failed to connect wallet';
       setError(message);
       console.error('[OrbitPath] Wallet connection error:', err);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleManualEntry = async () => {
+    const key = manualPublicKey.trim();
+    
+    if (!key) {
+      setError('Please enter a public key');
+      return;
+    }
+
+    // Validate the key format before connecting
+    if (!key.startsWith('G') || key.length !== 56) {
+      setError('Invalid Stellar public key format (must start with G and be 56 characters)');
+      return;
+    }
+
+    setConnecting(true);
+    setError(null);
+
+    try {
+      // Store key in sessionStorage for the adapter to retrieve
+      sessionStorage.setItem('orbitpath_manual_key', key);
+
+      const walletManager = getWalletManager();
+      const connection = await walletManager.connect('custom');
+      
+      setConnected(true);
+      setWalletInfo(connection);
+      onConnected(connection);
+      setShowManualEntry(false);
+      setManualPublicKey('');
+      
+      console.log('[OrbitPath] Manual wallet connected:', connection);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to connect wallet';
+      setError(message);
+      console.error('[OrbitPath] Manual wallet connection error:', err);
     } finally {
       setConnecting(false);
     }
@@ -128,31 +175,36 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
           </div>
 
           <div className="p-2">
-            {availableWallets.length > 0 ? (
-              availableWallets.map((walletType) => (
-                <button
-                  key={walletType}
-                  onClick={() => handleConnect(walletType)}
-                  disabled={connecting}
-                  className="w-full text-left px-4 py-3 hover:bg-secondary rounded transition-colors text-sm text-card-foreground disabled:opacity-50"
-                >
-                  <div className="font-medium capitalize">
-                    {walletType === 'custom' ? 'Manual Entry' : walletType}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {walletType === 'freighter'
-                      ? 'Browser extension wallet'
-                      : walletType === 'albedo'
-                      ? 'Web-based secure signing'
-                      : 'Enter public key manually'}
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="px-4 py-3 text-sm text-muted-foreground">
-                No wallets detected. Install Freighter or use Albedo.
+            <button
+              onClick={() => handleConnect('freighter')}
+              disabled={connecting}
+              className="w-full text-left px-4 py-3 hover:bg-secondary rounded transition-colors text-sm text-card-foreground disabled:opacity-50 border-b border-border"
+            >
+              <div className="font-medium">Freighter</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Browser extension wallet
               </div>
-            )}
+            </button>
+            <button
+              onClick={() => handleConnect('albedo')}
+              disabled={connecting}
+              className="w-full text-left px-4 py-3 hover:bg-secondary rounded transition-colors text-sm text-card-foreground disabled:opacity-50 border-b border-border"
+            >
+              <div className="font-medium">Albedo</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Web-based secure signing
+              </div>
+            </button>
+            <button
+              onClick={() => handleConnect('custom')}
+              disabled={connecting}
+              className="w-full text-left px-4 py-3 hover:bg-secondary rounded transition-colors text-sm text-card-foreground disabled:opacity-50"
+            >
+              <div className="font-medium">Manual Entry</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Enter public key directly
+              </div>
+            </button>
           </div>
 
           {error && (
@@ -160,6 +212,57 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
               {error}
             </div>
           )}
+        </div>
+      )}
+
+      {showManualEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-card-foreground mb-4">
+              Enter Your Stellar Public Key
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Your public key starts with &apos;G&apos; and is 56 characters long.
+            </p>
+            
+            <input
+              type="text"
+              placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+              value={manualPublicKey}
+              onChange={(e) => {
+                setManualPublicKey(e.target.value);
+                setError(null);
+              }}
+              className="w-full px-3 py-2 bg-background border border-border rounded text-sm text-foreground placeholder-muted-foreground mb-4 focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+
+            {error && (
+              <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowManualEntry(false);
+                  setManualPublicKey('');
+                  setError(null);
+                }}
+                disabled={connecting}
+                className="px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary rounded transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleManualEntry}
+                disabled={connecting || !manualPublicKey.trim()}
+                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary/90 text-primary-foreground rounded transition-colors disabled:opacity-50"
+              >
+                {connecting ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
