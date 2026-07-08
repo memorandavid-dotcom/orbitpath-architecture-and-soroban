@@ -5,12 +5,11 @@
  */
 
 import {
-  Server,
   TransactionBuilder,
   Operation,
   Asset,
   Networks,
-  Account,
+  FeeBumpTransaction,
   Transaction,
 } from "@stellar/stellar-sdk";
 
@@ -49,360 +48,255 @@ export interface TransactionDetails {
   hash: string;
   fee: number;
   operations: Operation[];
-  memo: string;
-  signers: string[];
+  path: ConversionAsset[];
+  sourceAmount: string;
+  destinationAmount: string;
 }
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const HORIZON_URL = "https://horizon.stellar.org";
-const HORIZON_TESTNET_URL = "https://horizon-testnet.stellar.org";
-const TESTNET_NETWORK_PASSPHRASE = Networks.TESTNET_NETWORK_PASSPHRASE;
-const PUBLIC_NETWORK_PASSPHRASE = Networks.PUBLIC_NETWORK_PASSPHRASE;
-
-// Standard Stellar transaction fee (in stroops)
-const BASE_FEE = 100; // stroops = 0.00001 XLM
-const DEFAULT_SLIPPAGE_PERCENT = 0.5; // 0.5% slippage tolerance
+const NETWORK_BASE_FEE = 100; // stroops
+const DEFAULT_TIMEOUT = 300; // 5 minutes
 
 // ============================================================================
 // CLASS: PathPaymentBuilder
 // ============================================================================
 
 export class PathPaymentBuilder {
-  private server: Server;
-  private network: "public" | "testnet";
-  private networkPassphrase: string;
-
-  constructor(network: "public" | "testnet" = "public") {
-    const url = network === "testnet" ? HORIZON_TESTNET_URL : HORIZON_URL;
-    this.server = new Server(url);
-    this.network = network;
-    this.networkPassphrase =
-      network === "testnet"
-        ? TESTNET_NETWORK_PASSPHRASE
-        : PUBLIC_NETWORK_PASSPHRASE;
-  }
-
   /**
    * Builds a PathPaymentStrictReceive transaction
-   * 
-   * Recipient receives exact amount; sender may send variable amount
-   * 
-   * @param params - Path payment parameters
-   * @returns XDR transaction ready for signing
+   * (Sender specifies max send amount, recipient gets exact amount)
    */
-  async buildPathPaymentStrictReceive(
+  static buildPathPaymentStrictReceive(
     params: PathPaymentParams
-  ): Promise<Transaction> {
-    console.log("[OrbitPath] Building PathPaymentStrictReceive transaction");
-
-    try {
-      // Get sender's account sequence number
-      const sourceAccount = await this.server.loadAccount(params.source);
-
-      // Build operation
-      const operation: any = {
-        destination: params.destination,
-        asset: this.assetToStellarAsset(params.destinationAsset),
-        amount: params.destinationAmount,
-        send_asset: this.assetToStellarAsset(params.sendAsset),
-        send_max: params.sendMaxAmount,
-        path: params.path.map((asset) => this.assetToStellarAsset(asset)),
-      };
-
-      // Build transaction
-      let builder = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      });
-
-      // Add memo if provided
-      if (params.memo) {
-        builder = builder.addMemo(Operation.memo(params.memo));
-      }
-
-      const transaction = builder
-        .addOperation(Operation.pathPaymentStrictReceive(operation))
-        .setTimeout(300) // 5 minute timeout
-        .build();
-
-      console.log("[OrbitPath] PathPaymentStrictReceive transaction built");
-      return transaction;
-    } catch (error) {
-      console.error("[OrbitPath] Failed to build PathPaymentStrictReceive:", error);
-      throw new Error(`Failed to build path payment: ${error}`);
-    }
-  }
-
-  /**
-   * Builds a PathPaymentStrictSend transaction
-   * 
-   * Sender sends exact amount; recipient may receive variable amount
-   * 
-   * @param params - Strict send parameters
-   * @returns XDR transaction ready for signing
-   */
-  async buildPathPaymentStrictSend(
-    params: PathPaymentStrictSendParams
-  ): Promise<Transaction> {
-    console.log("[OrbitPath] Building PathPaymentStrictSend transaction");
-
-    try {
-      // Get sender's account sequence number
-      const sourceAccount = await this.server.loadAccount(params.source);
-
-      // Build operation
-      const operation: any = {
-        destination: params.destination,
-        asset: this.assetToStellarAsset(params.destinationAsset),
-        dest_min: params.destinationMinAmount,
-        send_asset: this.assetToStellarAsset(params.sendAsset),
-        send_amount: params.sendAmount,
-        path: params.path.map((asset) => this.assetToStellarAsset(asset)),
-      };
-
-      // Build transaction
-      let builder = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      });
-
-      // Add memo if provided
-      if (params.memo) {
-        builder = builder.addMemo(Operation.memo(params.memo));
-      }
-
-      const transaction = builder
-        .addOperation(Operation.pathPaymentStrictSend(operation))
-        .setTimeout(300)
-        .build();
-
-      console.log("[OrbitPath] PathPaymentStrictSend transaction built");
-      return transaction;
-    } catch (error) {
-      console.error("[OrbitPath] Failed to build PathPaymentStrictSend:", error);
-      throw new Error(`Failed to build path payment: ${error}`);
-    }
-  }
-
-  /**
-   * Builds a transaction from a PathOption
-   * 
-   * Convenience method that auto-calculates send_max with slippage
-   * 
-   * @param senderPublicKey - Sender's public key
-   * @param recipientPublicKey - Recipient's public key
-   * @param sourceAsset - Asset sender is sending
-   * @param pathOption - Selected path option
-   * @param slippagePercent - Acceptable slippage (default 0.5%)
-   * @param memo - Optional memo field
-   * @returns Transaction ready for signing
-   */
-  async buildFromPathOption(
-    senderPublicKey: string,
-    recipientPublicKey: string,
-    sourceAsset: ConversionAsset,
-    pathOption: PathOption,
-    slippagePercent: number = DEFAULT_SLIPPAGE_PERCENT,
-    memo?: string
-  ): Promise<Transaction> {
-    console.log("[OrbitPath] Building transaction from path option");
-
-    // Calculate send_max with slippage tolerance
-    const sourceAmount = parseFloat(pathOption.sourceAmount);
-    const slippageMultiplier = 1 + slippagePercent / 100;
-    const sendMax = (sourceAmount * slippageMultiplier).toFixed(7);
-
-    // Remove source and destination from path to get intermediaries
-    const intermediaries = pathOption.path.slice(1, -1);
-
-    const params: PathPaymentParams = {
-      source: senderPublicKey,
-      destination: recipientPublicKey,
-      destinationAsset: pathOption.path[pathOption.path.length - 1],
-      destinationAmount: pathOption.destinationAmount,
-      sendAsset: sourceAsset,
-      sendMaxAmount: sendMax,
-      path: intermediaries,
+  ): TransactionDetails {
+    const {
+      source,
+      destination,
+      destinationAsset,
+      destinationAmount,
+      sendAsset,
+      sendMaxAmount,
+      path,
       memo,
-      network: this.network,
-    };
-
-    return this.buildPathPaymentStrictReceive(params);
-  }
-
-  /**
-   * Validates a built transaction before signing
-   * 
-   * @param transaction - Transaction to validate
-   * @returns Validation result with any warnings
-   */
-  validateTransaction(transaction: Transaction): {
-    valid: boolean;
-    warnings: string[];
-  } {
-    const warnings: string[] = [];
-
-    // Check if transaction has operations
-    if (!transaction.operations || transaction.operations.length === 0) {
-      return { valid: false, warnings: ["Transaction has no operations"] };
-    }
-
-    // Check operation type
-    const op = transaction.operations[0] as any;
-    if (
-      op.type !== "pathPaymentStrictReceive" &&
-      op.type !== "pathPaymentStrictSend"
-    ) {
-      return { valid: false, warnings: ["Operation is not a path payment"] };
-    }
-
-    // Check amounts are positive
-    if (parseFloat(op.amount || op.send_amount) <= 0) {
-      warnings.push("Amount is zero or negative");
-    }
-
-    // Check for reasonable fee
-    if (transaction.fee > 1000) {
-      warnings.push(
-        `Fee seems high: ${transaction.fee} stroops (${transaction.fee / 100000} XLM)`
-      );
-    }
-
-    // Check if path exists
-    if (!op.path || op.path.length === 0) {
-      warnings.push("Path payment has empty path (direct transfer)");
-    }
-
-    return { valid: warnings.length === 0, warnings };
-  }
-
-  /**
-   * Submits a signed transaction to the Stellar network
-   * 
-   * @param signedTransaction - Transaction signed by wallet
-   * @returns Transaction result with hash and status
-   */
-  async submitTransaction(signedTransaction: Transaction): Promise<{
-    hash: string;
-    status: string;
-    envelope: string;
-  }> {
-    console.log("[OrbitPath] Submitting signed transaction");
+      network = "testnet",
+    } = params;
 
     try {
-      const result = await this.server.submitTransaction(signedTransaction);
-      console.log("[OrbitPath] Transaction submitted successfully:", result.hash);
+      // Convert to Stellar Assets
+      const sendStellarAsset = this.convertToStellarAsset(sendAsset);
+      const destStellarAsset = this.convertToStellarAsset(destinationAsset);
+      const pathAssets = path
+        .slice(1, -1) // Exclude source and destination
+        .map((asset) => this.convertToStellarAsset(asset));
 
-      return {
-        hash: result.hash,
-        status: "submitted",
-        envelope: signedTransaction.toEnvelope().toXDR("base64"),
-      };
-    } catch (error: any) {
-      console.error("[OrbitPath] Transaction submission failed:", error);
-      throw new Error(
-        `Failed to submit transaction: ${error.message || error}`
-      );
-    }
-  }
+      // Create transaction builder
+      const networkPassphrase =
+        network === "public" ? Networks.PUBLIC_NETWORK : Networks.TESTNET_NETWORK;
 
-  /**
-   * Polls for transaction confirmation
-   * 
-   * @param txHash - Transaction hash
-   * @param maxRetries - Maximum polling attempts
-   * @param delayMs - Delay between polls (milliseconds)
-   * @returns Transaction result details
-   */
-  async pollTransactionStatus(
-    txHash: string,
-    maxRetries: number = 30,
-    delayMs: number = 1000
-  ): Promise<any> {
-    console.log(`[OrbitPath] Polling transaction status: ${txHash}`);
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const tx = await this.server.transactions().transaction(txHash).call();
-        console.log("[OrbitPath] Transaction confirmed!");
-        return tx;
-      } catch (error: any) {
-        if (error.status === 404) {
-          // Transaction not yet in ledger
-          if (i < maxRetries - 1) {
-            await this.delay(delayMs);
-            continue;
-          }
-        } else {
-          throw error;
+      const transactionBuilder = new TransactionBuilder(
+        {
+          accountId: source,
+          sequence: "0", // Will be updated by signing wallet
+          incrementSequenceNumber: false,
+        },
+        {
+          fee: NETWORK_BASE_FEE.toString(),
+          networkPassphrase,
+          timebounds: {
+            minTime: 0,
+            maxTime: Math.floor(Date.now() / 1000) + DEFAULT_TIMEOUT,
+          },
         }
+      );
+
+      // Add memo if provided
+      if (memo) {
+        transactionBuilder.addMemo({
+          type: "text",
+          value: memo,
+        });
       }
-    }
 
-    throw new Error("Transaction confirmation timeout");
-  }
+      // Add PathPaymentStrictReceive operation
+      transactionBuilder.addOperation(
+        Operation.pathPaymentStrictReceive({
+          destination,
+          sendAsset: sendStellarAsset,
+          sendMax: sendMaxAmount,
+          destAsset: destStellarAsset,
+          destAmount: destinationAmount,
+          path: pathAssets,
+        })
+      );
 
-  /**
-   * Gets detailed information about a transaction
-   * 
-   * @param txHash - Transaction hash
-   * @returns Full transaction details
-   */
-  async getTransactionDetails(txHash: string): Promise<any> {
-    try {
-      const tx = await this.server.transactions().transaction(txHash).call();
+      const transaction = transactionBuilder.build();
+
       return {
-        hash: tx.hash,
-        ledger: tx.ledger_attr,
-        timestamp: tx.created_at,
-        fee: tx.fee_charged,
-        operations: tx.operation_count,
-        successful: tx.successful,
-        result: tx,
+        xdr: transaction.toEnvelope().toXDR("base64"),
+        hash: transaction.hash().toString("hex"),
+        fee: parseInt(transaction.fee),
+        operations: transaction.operations,
+        path: path,
+        sourceAmount: sendMaxAmount,
+        destinationAmount,
       };
     } catch (error) {
-      console.error("[OrbitPath] Failed to get transaction details:", error);
+      console.error("[OrbitPath] Error building PathPaymentStrictReceive:", error);
       throw error;
     }
   }
 
   /**
-   * Formats transaction details for display
-   * 
-   * @param txHash - Transaction hash
-   * @returns Human-readable transaction summary
+   * Builds a PathPaymentStrictSend transaction
+   * (Sender sends exact amount, recipient gets minimum amount)
    */
-  async getTransactionSummary(txHash: string): Promise<string> {
-    const details = await this.getTransactionDetails(txHash);
+  static buildPathPaymentStrictSend(
+    params: PathPaymentStrictSendParams
+  ): TransactionDetails {
+    const {
+      source,
+      destination,
+      destinationAsset,
+      destinationMinAmount,
+      sendAsset,
+      sendAmount,
+      path,
+      memo,
+      network = "testnet",
+    } = params;
 
-    return `
-Transaction Summary
-===================
-Hash: ${details.hash}
-Ledger: ${details.ledger}
-Time: ${new Date(details.timestamp).toLocaleString()}
-Fee: ${details.fee} stroops (${details.fee / 100000} XLM)
-Status: ${details.successful ? "SUCCESS" : "FAILED"}
-Operations: ${details.operations}
-    `.trim();
+    try {
+      // Convert to Stellar Assets
+      const sendStellarAsset = this.convertToStellarAsset(sendAsset);
+      const destStellarAsset = this.convertToStellarAsset(destinationAsset);
+      const pathAssets = path
+        .slice(1, -1) // Exclude source and destination
+        .map((asset) => this.convertToStellarAsset(asset));
+
+      // Create transaction builder
+      const networkPassphrase =
+        network === "public" ? Networks.PUBLIC_NETWORK : Networks.TESTNET_NETWORK;
+
+      const transactionBuilder = new TransactionBuilder(
+        {
+          accountId: source,
+          sequence: "0", // Will be updated by signing wallet
+          incrementSequenceNumber: false,
+        },
+        {
+          fee: NETWORK_BASE_FEE.toString(),
+          networkPassphrase,
+          timebounds: {
+            minTime: 0,
+            maxTime: Math.floor(Date.now() / 1000) + DEFAULT_TIMEOUT,
+          },
+        }
+      );
+
+      // Add memo if provided
+      if (memo) {
+        transactionBuilder.addMemo({
+          type: "text",
+          value: memo,
+        });
+      }
+
+      // Add PathPaymentStrictSend operation
+      transactionBuilder.addOperation(
+        Operation.pathPaymentStrictSend({
+          destination,
+          sendAsset: sendStellarAsset,
+          sendAmount: sendAmount,
+          destAsset: destStellarAsset,
+          destMin: destinationMinAmount,
+          path: pathAssets,
+        })
+      );
+
+      const transaction = transactionBuilder.build();
+
+      return {
+        xdr: transaction.toEnvelope().toXDR("base64"),
+        hash: transaction.hash().toString("hex"),
+        fee: parseInt(transaction.fee),
+        operations: transaction.operations,
+        path: path,
+        sourceAmount: sendAmount,
+        destinationAmount: destinationMinAmount,
+      };
+    } catch (error) {
+      console.error("[OrbitPath] Error building PathPaymentStrictSend:", error);
+      throw error;
+    }
   }
 
-  // ========================================================================
-  // PRIVATE HELPERS
-  // ========================================================================
+  /**
+   * Estimates fees for a path payment
+   */
+  static estimateFees(
+    sourceAmount: string,
+    feePercent: number,
+    hops: number
+  ): {
+    networkFee: number;
+    routingFee: number;
+    totalFee: number;
+    totalFeePercent: number;
+  } {
+    const networkFee = NETWORK_BASE_FEE / 10_000_000; // Convert stroops to XLM
 
-  private assetToStellarAsset(asset: ConversionAsset): Asset {
-    if (asset.code === "XLM" || asset.issuer === "native") {
+    // Estimate routing fee based on hops and fee percent
+    const routingFee = (parseFloat(sourceAmount) * feePercent) / 100;
+
+    const totalFee = networkFee + routingFee;
+    const totalFeePercent = (totalFee / parseFloat(sourceAmount)) * 100;
+
+    return {
+      networkFee,
+      routingFee,
+      totalFee,
+      totalFeePercent,
+    };
+  }
+
+  /**
+   * Converts ConversionAsset to Stellar Asset
+   */
+  private static convertToStellarAsset(asset: ConversionAsset): Asset {
+    if (asset.code === "XLM" && asset.issuer === "native") {
       return Asset.native();
     }
     return new Asset(asset.code, asset.issuer);
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  /**
+   * Parses a transaction XDR string
+   */
+  static parseTransactionXDR(xdr: string, network: "public" | "testnet" = "testnet") {
+    try {
+      const networkPassphrase =
+        network === "public" ? Networks.PUBLIC_NETWORK : Networks.TESTNET_NETWORK;
+
+      const transaction = TransactionBuilder.fromXDR(xdr, networkPassphrase);
+
+      return {
+        source: transaction.source,
+        fee: transaction.fee,
+        sequence: transaction.sequence,
+        operations: transaction.operations,
+        memo: transaction.memo,
+        valid: true,
+      };
+    } catch (error) {
+      console.error("[OrbitPath] Error parsing transaction XDR:", error);
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
   }
 }
 
@@ -411,39 +305,24 @@ Operations: ${details.operations}
 // ============================================================================
 
 /**
- * Calculates send_max with slippage tolerance
+ * Calculates slippage for a payment path
  */
-export function calculateSendMax(
-  sourceAmount: string,
-  slippagePercent: number = DEFAULT_SLIPPAGE_PERCENT
+export function calculateSlippage(
+  expectedAmount: string,
+  tolerancePercent: number = 1
 ): string {
-  const amount = parseFloat(sourceAmount);
-  const slippageMultiplier = 1 + slippagePercent / 100;
-  return (amount * slippageMultiplier).toFixed(7);
+  const expectedValue = parseFloat(expectedAmount);
+  const slippageAmount = (expectedValue * tolerancePercent) / 100;
+  const minAmount = expectedValue - slippageAmount;
+  return Math.max(0, minAmount).toFixed(7);
 }
 
 /**
- * Estimates network fee for transaction
+ * Formats transaction fee in stroops
  */
-export function estimateNetworkFee(
-  numOperations: number = 1,
-  baseFee: number = BASE_FEE
-): number {
-  return baseFee * numOperations;
-}
-
-/**
- * Formats XLM amount to stroops
- */
-export function xlmToStroops(xlm: number): number {
-  return Math.round(xlm * 10000000);
-}
-
-/**
- * Formats stroops to XLM
- */
-export function stroopsToXlm(stroops: number): number {
-  return stroops / 10000000;
+export function formatFee(stroops: number): string {
+  const xlm = stroops / 10_000_000;
+  return `${xlm.toFixed(7)} XLM`;
 }
 
 export default PathPaymentBuilder;

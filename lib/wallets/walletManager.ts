@@ -5,8 +5,6 @@
  * Supports: Freighter, Albedo, and custom wallet implementations
  */
 
-import { Transaction } from "@stellar/stellar-sdk";
-
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -23,7 +21,7 @@ export interface WalletConnection {
 export interface SigningResult {
   signedXDR: string;
   publicKey: string;
-  signature: string;
+  signature?: string;
 }
 
 export interface AuthRequest {
@@ -46,7 +44,7 @@ export abstract class WalletAdapter {
   abstract disconnect(): Promise<void>;
   abstract getPublicKey(): Promise<string>;
   abstract isInstalled(): boolean;
-  abstract signTransaction(transaction: Transaction): Promise<SigningResult>;
+  abstract signTransaction(transactionXdr: string): Promise<SigningResult>;
   abstract signMessage(message: string): Promise<SigningResult>;
   abstract isConnected(): boolean;
 }
@@ -96,20 +94,17 @@ export class FreighterAdapter extends WalletAdapter {
     return this.publicKey;
   }
 
-  async signTransaction(transaction: Transaction): Promise<SigningResult> {
+  async signTransaction(transactionXdr: string): Promise<SigningResult> {
     if (!this.isConnected()) {
       throw new Error("Wallet not connected");
     }
 
     try {
-      const result = await (window as any).freighter.signTransaction(
-        transaction.toXDR()
-      );
+      const result = await (window as any).freighter.signTransaction(transactionXdr);
 
       return {
         signedXDR: result,
         publicKey: this.publicKey!,
-        signature: result.split(":")[1] || "", // Extract signature portion
       };
     } catch (error) {
       throw new Error(`Transaction signing failed: ${error}`);
@@ -186,7 +181,7 @@ export class AlbedoAdapter extends WalletAdapter {
     return this.publicKey;
   }
 
-  async signTransaction(transaction: Transaction): Promise<SigningResult> {
+  async signTransaction(transactionXdr: string): Promise<SigningResult> {
     if (!this.isConnected()) {
       throw new Error("Wallet not connected");
     }
@@ -195,14 +190,13 @@ export class AlbedoAdapter extends WalletAdapter {
       const result = await this.sendAlbedoMessage({
         method: "tx_sign",
         params: {
-          xdr: transaction.toXDR(),
+          xdr: transactionXdr,
         },
       });
 
       return {
         signedXDR: result.signed_envelope_xdr,
         publicKey: this.publicKey!,
-        signature: result.signature || "",
       };
     } catch (error) {
       throw new Error(`Transaction signing failed: ${error}`);
@@ -356,12 +350,12 @@ export class WalletManager {
   /**
    * Signs a transaction
    */
-  async signTransaction(transaction: Transaction): Promise<SigningResult> {
+  async signTransaction(transactionXdr: string): Promise<SigningResult> {
     if (!this.currentAdapter) {
       throw new Error("No wallet connected");
     }
 
-    return this.currentAdapter.signTransaction(transaction);
+    return this.currentAdapter.signTransaction(transactionXdr);
   }
 
   /**
